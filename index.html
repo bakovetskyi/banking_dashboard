@@ -179,10 +179,6 @@ body.printing .printhd{display:block;margin-bottom:16px;padding-bottom:10px;bord
       <label class="ctl-lbl" for="dFrom">Період</label>
       <div class="row2"><select id="dFrom"></select><select id="dTo"></select></div>
     </div>
-    <div class="ctl">
-      <span class="ctl-lbl">Групи банків</span>
-      <div class="chips" id="groupChips"></div>
-    </div>
     <div class="ctl" data-for="mode">
       <span class="ctl-lbl">Режим фінрезультату</span>
       <div class="seg" id="modeSeg">
@@ -406,7 +402,7 @@ function pc(a,b,pos){
 
 /* ================= стан ================= */
 const state={sec:'overview',metric:'a_total',norm:'abs',base:'a_total',scope:'sector',secRatio:'r_gov',
-  from:0,to:ND-1,groups:new Set(DATA.groups.map((_,i)=>i)),banks:[],mode:'ytd',sort:{k:'v',dir:-1},war:true};
+  from:0,to:ND-1,banks:[],mode:'ytd',sort:{k:'v',dir:-1},war:true};
 const SEC=[{id:'overview',l:'Огляд'},{id:'assets',l:'Активи',def:'a_total'},{id:'liab',l:'Пасиви',def:'l_total'},
   {id:'profit',l:'Прибуток',def:'p_net'},{id:'capital',l:'Капітал',def:'c_total'},
   {id:'structure',l:'Структура активів'},{id:'concentration',l:'Концентрація'},{id:'profitability',l:'Дохідність'}];
@@ -436,9 +432,9 @@ function raw(mid,d,b){
 function agg(mid,d,banks){let s=0,any=false;for(const b of banks){const v=raw(mid,d,b);if(v!==null){s+=v;any=true;}}return any?s:null;}
 const activeCache=new Map();
 function activeAt(d){
-  const key=d+'|'+[...state.groups].sort().join(',');
+  const key=d;   // групового фільтра більше немає, ключ кешу — лише дата
   if(activeCache.has(key)) return activeCache.get(key);
-  const r=rowsByDate[d].filter(ri=>state.groups.has(rowGroup[ri])).map(ri=>DATA.rows[ri][1]);
+  const r=rowsByDate[d].map(ri=>DATA.rows[ri][1]);   // усі рядки на дату — груп для виключення більше немає
   activeCache.set(key,r); return r;
 }
 function ratioAt(rid,d,banks){
@@ -523,17 +519,6 @@ function buildStatic(){
   $('#baseMetric').value=state.base;
   $('#secRatio').innerHTML=Object.keys(RATIO).map(r=>`<option value="${r}">${RATIO[r].l}</option>`).join('');
   $('#secRatio').value=state.secRatio;
-  $('#groupChips').innerHTML=DATA.groups.map((g,i)=>{
-    const sh=g.replace('Банки ','').replace('з державною часткою','державні')
-      .replace('іноземних банківських груп','іноземні').replace('з приватним капіталом','приватні');
-    return `<button class="chip" data-g="${i}" aria-pressed="${state.groups.has(i)}">${sh}</button>`;}).join('');
-  $$('#groupChips .chip').forEach(b=>b.onclick=()=>{
-    const i=+b.dataset.g;
-    state.groups.has(i)?state.groups.delete(i):state.groups.add(i);
-    if(!state.groups.size) state.groups.add(i);
-    b.setAttribute('aria-pressed',state.groups.has(i));
-    activeCache.clear(); state.banks=state.banks.filter(x=>state.groups.has(B[x].g));
-    buildBankList(); render();});
   buildScope();
 }
 function buildScope(){
@@ -545,7 +530,7 @@ function buildScope(){
 function buildBankList(){
   const q=($('#bankSearch').value||'').toLowerCase().trim();
   const gs=['держ','інозем','приват'];
-  const list=B.map((b,i)=>({...b,i})).filter(b=>state.groups.has(b.g)).filter(b=>!q||b.n.toLowerCase().includes(q));
+  const list=B.map((b,i)=>({...b,i})).filter(b=>isActiveBank(b.i)).filter(b=>!q||b.n.toLowerCase().includes(q));
   $('#bankList').innerHTML=list.map(b=>`<label class="picker-item"><input type="checkbox" data-b="${b.i}" ${state.banks.includes(b.i)?'checked':''}>
     <span>${b.n}</span><span class="g">${gs[b.g]}</span></label>`).join('')||
     '<div style="padding:10px;color:var(--faint);font-size:12px">Нічого не знайдено</div>';
@@ -560,6 +545,7 @@ function topBanks(n,mid){
   return activeAt(d).map(b=>({b,v:agg(mid||'a_total',d,[b])??-Infinity}))
     .sort((x,y)=>y.v-x.v).slice(0,n).map(x=>x.b);
 }
+function isActiveBank(i){return B[i].l===ND-1;}   // діє станом на останню дату вибірки
 function bankColor(i){const k=state.banks.indexOf(i);return PALETTE[(k<0?0:k)%PALETTE.length];}
 function colorScale(){
   const dom=state.banks.map(i=>B[i].n), rng=state.banks.map(i=>bankColor(i));
@@ -1034,10 +1020,10 @@ $$('#presets .chip').forEach(btn=>btn.onclick=()=>{
   if(p==='clear') state.banks=[];
   else if(p==='top5') state.banks=topBanks(5);
   else{const g=p==='state'?0:p==='foreign'?1:2;
-    state.banks=B.map((b,i)=>({...b,i})).filter(b=>b.g===g&&state.groups.has(b.g))
-      .map(b=>({i:b.i,v:agg('a_total',state.to,[b.i])??-1})).sort((x,y)=>y.v-x.v).slice(0,12).map(x=>x.i);}
+    state.banks=B.map((b,i)=>({...b,i})).filter(b=>isActiveBank(b.i)&&b.g===g)
+      .map(b=>({i:b.i,v:agg('a_total',state.to,[b.i])??-Infinity})).sort((x,y)=>y.v-x.v).slice(0,12).map(x=>x.i);}
   buildBankList(); render();});
-state.banks=topBanks(5);
+state.banks=[];  // нейтральний старт: жоден банк не привілейований, показується сектор
 syncControls(); buildBankList(); render();
 let rt; window.addEventListener('resize',()=>{clearTimeout(rt);rt=setTimeout(render,250);});
 </script>
